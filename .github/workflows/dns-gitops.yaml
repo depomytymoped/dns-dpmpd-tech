@@ -1,0 +1,436 @@
+# .github/workflows/dns-gitops.yml
+name: DNS GitOps with Comment-Based Deployment
+
+on:
+  # Test and comment on PRs
+  pull_request:
+    branches: [main]
+    paths: 
+      - 'dnsconfig.js'
+      - 'dns-helpers/**'
+      - 'domains/**'
+      - 'environments/**'
+  
+  # Deploy on main branch (automatic)
+  push:
+    branches: [main]
+    paths: 
+      - 'dnsconfig.js'
+      - 'dns-helpers/**'
+      - 'domains/**'
+      - 'environments/**'
+  
+  # Deploy via PR comment (manual trigger)
+  issue_comment:
+    types: [created]
+
+env:
+  DNSCONTROL_VERSION: "4.7.0"
+
+jobs:
+  # ================================================================
+  # VALIDATION & TESTING - Runs on all PRs
+  # ================================================================
+  validate-and-test:
+    name: 🔍 Validate & Test DNS Configuration
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      has_changes: ${{ steps.preview.outputs.has_changes }}
+      preview_output: ${{ steps.preview.outputs.preview_output }}
+      validation_status: ${{ steps.validation.outputs.status }}
+    
+    steps:
+    - name: Checkout PR code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+
+    - name: Setup DNSControl
+      run: |
+        curl -L -o dnscontrol.tar.gz \
+          "https://github.com/StackExchange/dnscontrol/releases/download/v${{ env.DNSCONTROL_VERSION }}/dnscontrol-Linux.tar.gz"
+        tar -xzf dnscontrol.tar.gz
+        sudo mv dnscontrol /usr/local/bin/
+        dnscontrol version
+
+    - name: Create credentials file
+      run: |
+        cat > creds.json << EOF
+        {
+          "digitalocean": {
+            "TYPE": "DIGITALOCEAN",
+            "token": "${{ secrets.DIGITALOCEAN_TOKEN }}"
+          }
+        }
+        EOF
+
+    - name: Validate configuration
+      id: validation
+      run: |
+        echo "🔍 Validating DNSControl configuration..."
+        if dnscontrol check; then
+          echo "✅ Configuration is valid"
+          echo "status=success" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Configuration validation failed"
+          echo "status=failed" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Test DNS preview
+      id: preview
+      run: |
+        echo "🔍 Generating DNS changes preview..."
+        
+        # Generate preview and capture output
+        if dnscontrol preview > preview_output.txt 2>&1; then
+          echo "preview_success=true" >> $GITHUB_OUTPUT
+        else
+          echo "preview_success=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Check if there are actual changes
+        if grep -q "No changes to be made" preview_output.txt; then
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          echo "changes_summary=No DNS changes detected" >> $GITHUB_OUTPUT
+        else
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          # Count changes
+          create_count=$(grep -c "CREATE" preview_output.txt || echo "0")
+          update_count=$(grep -c "MODIFY" preview_output.txt || echo "0") 
+          delete_count=$(grep -c "DELETE" preview_output.txt || echo "0")
+          echo "changes_summary=Creates: $create_count, Updates: $update_count, Deletes: $delete_count" >> $GITHUB_OUTPUT
+        fi
+        
+        # Store output for comment (escape for JSON)
+        {
+          echo "preview_output<<EOF"
+          cat preview_output.txt
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+
+    - name: Test against DigitalOcean nameservers
+      id: dns_test
+      run: |
+        echo "🧪 Testing current DNS configuration..."
+        
+        # Test key records against DO nameservers
+        echo "=== Testing Root Domain ===" > dns_test_results.txt
+        dig +short @ns1.digitalocean.com dpmpd.tech A >> dns_test_results.txt
+        
+        echo "=== Testing Key Subdomains ===" >> dns_test_results.txt
+        for subdomain in abyss api.cc monitor validator; do
+          echo "Testing ${subdomain}.dpmpd.tech:" >> dns_test_results.txt
+          dig +short @ns1.digitalocean.com ${subdomain}.dpmpd.tech A >> dns_test_results.txt
+        done
+        
+        echo "=== IPv6 Tests ===" >> dns_test_results.txt
+        dig +short @ns1.digitalocean.com abyss.dpmpd.tech AAAA >> dns_test_results.txt
+        
+        # Store results
+        {
+          echo "dns_test_results<<EOF"
+          cat dns_test_results.txt
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+
+  # ================================================================
+  # COMMENT ON PR - Post test results
+  # ================================================================
+  comment-results:
+    name: 💬 Comment Test Results on PR
+    runs-on: ubuntu-latest
+    needs: validate-and-test
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Create PR comment with results
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const hasChanges = '${{ needs.validate-and-test.outputs.has_changes }}' === 'true';
+          const validationStatus = '${{ needs.validate-and-test.outputs.validation_status }}';
+          const previewOutput = `${{ needs.validate-and-test.outputs.preview_output }}`;
+          const dnsTestResults = `${{ steps.dns_test.outputs.dns_test_results }}`;
+          
+          const statusIcon = validationStatus === 'success' ? '✅' : '❌';
+          const changesIcon = hasChanges ? '🔄' : '✅';
+          
+          const body = `## ${statusIcon} DNS Configuration Test Results
+          
+          **Validation:** ${validationStatus === 'success' ? 'PASSED' : 'FAILED'}  
+          **Changes Detected:** ${hasChanges ? 'YES' : 'NO'}  
+          **Status:** ${hasChanges ? 'Ready for deployment' : 'No changes to deploy'}
+          
+          ### ${changesIcon} DNS Changes Preview
+          
+          ${hasChanges ? '⚠️ **This PR will modify DNS records when deployed**' : '✅ **No DNS changes will be made**'}
+          
+          <details><summary>📋 Click to view detailed DNS changes</summary>
+          
+          \`\`\`diff
+          ${previewOutput}
+          \`\`\`
+          
+          </details>
+          
+          ### 🧪 Current DNS Test Results
+          
+          <details><summary>🔍 Current DNS resolution tests</summary>
+          
+          \`\`\`
+          ${dnsTestResults}
+          \`\`\`
+          
+          </details>
+          
+          ---
+          
+          ${hasChanges ? `
+          ### 🚀 Deployment Options
+          
+          **Option 1: Auto-deploy** - Merge this PR to automatically deploy changes  
+          **Option 2: Manual deploy** - Comment \`/deploy\` to deploy from this PR
+          
+          ### ⚠️ Deployment Notes:
+          - Changes will be applied to DigitalOcean DNS
+          - Global propagation may take 5-60 minutes
+          - Monitor deployment status after triggering
+          - Use \`/deploy\` command only if you're authorized
+          ` : `
+          ### ✅ Safe to Merge
+          This PR contains no DNS changes and is safe to merge.
+          `}
+          
+          ---
+          *🤖 Automated DNS testing • PR #${{ github.event.number }} • Commit: ${context.sha.substring(0, 7)}*
+          `;
+          
+          // Delete previous bot comments
+          const comments = await github.rest.issues.listComments({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+          });
+          
+          const botComments = comments.data.filter(comment => 
+            comment.user.type === 'Bot' && 
+            comment.body.includes('DNS Configuration Test Results')
+          );
+          
+          for (const comment of botComments) {
+            await github.rest.issues.deleteComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: comment.id,
+            });
+          }
+          
+          // Post new comment
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
+
+  # ================================================================
+  # DEPLOY VIA COMMENT - Deploy when someone comments "/deploy"
+  # ================================================================
+  deploy-via-comment:
+    name: 🚀 Deploy via PR Comment
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/deploy')
+    
+    # Require explicit approval environment
+    environment: 
+      name: dns-production
+      url: https://dpmpd.tech
+    
+    steps:
+    - name: Check user authorization
+      uses: actions/github-script@v7
+      with:
+        script: |
+          // List of users authorized to deploy DNS changes
+          const authorizedUsers = [
+            '${{ github.repository_owner }}',
+            // Add more authorized usernames here
+          ];
+          
+          const commentUser = context.payload.comment.user.login;
+          
+          if (!authorizedUsers.includes(commentUser)) {
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ @${commentUser} is not authorized to deploy DNS changes.\n\nAuthorized users: ${authorizedUsers.join(', ')}`
+            });
+            throw new Error(`User ${commentUser} not authorized for DNS deployment`);
+          }
+          
+          console.log(`✅ User ${commentUser} is authorized for deployment`);
+
+    - name: Get PR details
+      uses: actions/github-script@v7
+      id: pr_details
+      with:
+        script: |
+          const { data: pr } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+          });
+          
+          core.setOutput('head_sha', pr.head.sha);
+          core.setOutput('head_ref', pr.head.ref);
+
+    - name: Checkout PR code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ steps.pr_details.outputs.head_sha }}
+
+    - name: Setup DNSControl
+      run: |
+        curl -L -o dnscontrol.tar.gz \
+          "https://github.com/StackExchange/dnscontrol/releases/download/v${{ env.DNSCONTROL_VERSION }}/dnscontrol-Linux.tar.gz"
+        tar -xzf dnscontrol.tar.gz
+        sudo mv dnscontrol /usr/local/bin/
+
+    - name: Create credentials
+      run: |
+        cat > creds.json << EOF
+        {
+          "digitalocean": {
+            "TYPE": "DIGITALOCEAN",
+            "token": "${{ secrets.DIGITALOCEAN_TOKEN }}"
+          }
+        }
+        EOF
+
+    - name: Pre-deployment validation
+      run: |
+        echo "🔍 Final validation before deployment..."
+        dnscontrol check || exit 1
+        echo "✅ Configuration validated"
+
+    - name: Deploy DNS changes
+      id: deploy
+      run: |
+        echo "🚀 Deploying DNS changes from PR #${{ github.event.issue.number }}..."
+        echo "Triggered by: ${{ github.event.comment.user.login }}"
+        echo "Commit: ${{ steps.pr_details.outputs.head_sha }}"
+        
+        dnscontrol push
+        
+        echo "✅ DNS deployment completed"
+        echo "deployment_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
+    - name: Comment deployment success
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const deploymentTime = '${{ steps.deploy.outputs.deployment_time }}';
+          const commit = '${{ steps.pr_details.outputs.head_sha }}';
+          const actor = '${{ github.event.comment.user.login }}';
+          
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## ✅ DNS Deployment Successful!
+            
+            **Deployed by:** @${actor}  
+            **Time:** ${deploymentTime}  
+            **Commit:** ${commit.substring(0, 7)}  
+            **Method:** PR Comment Deployment
+            
+            ### 🔍 Verification
+            DNS changes have been applied to DigitalOcean. Monitor propagation:
+            - [Global DNS Check](https://www.whatsmydns.net/#A/dpmpd.tech)
+            - [DNS Checker](https://dnschecker.org/#A/dpmpd.tech)
+            
+            ### ⏱️ Propagation Timeline
+            - **Immediate:** DigitalOcean authoritative servers
+            - **5-30 minutes:** Most global DNS resolvers
+            - **Up to 24 hours:** Complete worldwide propagation
+            
+            ---
+            *🚀 Deployment completed via comment trigger*`
+          });
+
+    - name: Comment deployment failure
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## ❌ DNS Deployment Failed
+            
+            **Triggered by:** @${{ github.event.comment.user.login }}  
+            **Error:** Deployment failed during execution
+            
+            ### 🔍 Next Steps
+            1. Check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details
+            2. Fix any configuration issues
+            3. Update the PR and try again
+            
+            ### 🆘 Emergency Rollback
+            If DNS is broken, immediately run manual rollback or contact the infrastructure team.
+            
+            ---
+            *❌ Deployment failed via comment trigger*`
+          });
+
+  # ================================================================
+  # AUTO-DEPLOY ON MAIN - Automatic deployment when PR is merged
+  # ================================================================
+  auto-deploy:
+    name: 🚀 Auto-Deploy on Main Branch
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    environment: 
+      name: dns-production
+      url: https://dpmpd.tech
+    
+    steps:
+    - name: Checkout main branch
+      uses: actions/checkout@v4
+
+    - name: Setup DNSControl
+      run: |
+        curl -L -o dnscontrol.tar.gz \
+          "https://github.com/StackExchange/dnscontrol/releases/download/v${{ env.DNSCONTROL_VERSION }}/dnscontrol-Linux.tar.gz"
+        tar -xzf dnscontrol.tar.gz
+        sudo mv dnscontrol /usr/local/bin/
+
+    - name: Create credentials
+      run: |
+        cat > creds.json << EOF
+        {
+          "digitalocean": {
+            "TYPE": "DIGITALOCEAN",
+            "token": "${{ secrets.DIGITALOCEAN_TOKEN }}"
+          }
+        }
+        EOF
+
+    - name: Deploy DNS changes
+      run: |
+        echo "🚀 Auto-deploying DNS changes from main branch..."
+        echo "Commit: ${{ github.sha }}"
+        echo "Author: ${{ github.actor }}"
+        
+        dnscontrol check
+        dnscontrol push
+        
+        echo "✅ Auto-deployment completed"
