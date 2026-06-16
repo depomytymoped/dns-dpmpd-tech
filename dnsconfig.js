@@ -70,5 +70,5 @@ D(
     "_acme-challenge.rpc.cc",
     "yAA4-dtpJTclldaFlYQNFx220Lwf8Bj8GmpXrzpeHsw",
     TTL(SHORT_TTL)
-  ),
+  )
 );
