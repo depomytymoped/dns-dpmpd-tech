@@ -27,6 +27,13 @@ on:
 env:
   DNSCONTROL_VERSION: "4.7.0"
 
+# GITHUB_TOKEN defaults to read-only; the comment/deploy jobs need to read
+# PR data and write PR comments.
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   # ================================================================
   # VALIDATION & TESTING - Runs on all PRs
