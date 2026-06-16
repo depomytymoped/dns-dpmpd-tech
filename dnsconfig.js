@@ -1,4 +1,5 @@
 // dnsconfig.js - Generated from Hetzner export for dpmpd.tech
+// CI: verify DNSControl download URL fix (no-op comment)
 var REG_NONE = NewRegistrar("none");
 var DSP_DIGITALOCEAN = NewDnsProvider("digitalocean");
 
