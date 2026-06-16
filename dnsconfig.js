@@ -59,16 +59,16 @@ D(
   TXT(
     "_acme-challenge",
     "yAA4-dtpJTclldaFlYQNFx220Lwf8Bj8GmpXrzpeHsw",
-    TTL(SHORT_TTL),
+    TTL(SHORT_TTL)
   ),
   TXT(
     "_acme-challenge.api.cc",
     "ncLqTH0dC-Os-gWYxxRELwvFMM-xLAzGe6qYSH65W0A",
-    TTL(SHORT_TTL),
+    TTL(SHORT_TTL)
   ),
   TXT(
     "_acme-challenge.rpc.cc",
     "yAA4-dtpJTclldaFlYQNFx220Lwf8Bj8GmpXrzpeHsw",
-    TTL(SHORT_TTL),
+    TTL(SHORT_TTL)
   ),
 );
