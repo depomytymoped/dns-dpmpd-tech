@@ -1,4 +1,5 @@
 // dnsconfig.js - Generated from Hetzner export for dpmpd.tech
+// CI: verify DNSControl download URL fix (no-op comment)
 var REG_NONE = NewRegistrar("none");
 var DSP_DIGITALOCEAN = NewDnsProvider("digitalocean");
 
@@ -58,16 +59,16 @@ D(
   TXT(
     "_acme-challenge",
     "yAA4-dtpJTclldaFlYQNFx220Lwf8Bj8GmpXrzpeHsw",
-    TTL(SHORT_TTL),
+    TTL(SHORT_TTL)
   ),
   TXT(
     "_acme-challenge.api.cc",
     "ncLqTH0dC-Os-gWYxxRELwvFMM-xLAzGe6qYSH65W0A",
-    TTL(SHORT_TTL),
+    TTL(SHORT_TTL)
   ),
   TXT(
     "_acme-challenge.rpc.cc",
     "yAA4-dtpJTclldaFlYQNFx220Lwf8Bj8GmpXrzpeHsw",
-    TTL(SHORT_TTL),
-  ),
+    TTL(SHORT_TTL)
+  )
 );

@@ -27,6 +27,13 @@ on:
 env:
   DNSCONTROL_VERSION: "4.7.0"
 
+# GITHUB_TOKEN defaults to read-only; the comment/deploy jobs need to read
+# PR data and write PR comments.
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   # ================================================================
   # VALIDATION & TESTING - Runs on all PRs
@@ -96,10 +103,11 @@ jobs:
             echo "changes_summary=No DNS changes detected" >> $GITHUB_OUTPUT
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            # Count changes
-            create_count=$(grep -c "CREATE" preview_output.txt || echo "0")
-            update_count=$(grep -c "MODIFY" preview_output.txt || echo "0")
-            delete_count=$(grep -c "DELETE" preview_output.txt || echo "0")
+            # Count changes (grep -c exits non-zero on 0 matches; capture the
+            # count and never let the count itself become multiline)
+            create_count=$(grep -c "CREATE" preview_output.txt) || create_count=0
+            update_count=$(grep -c "MODIFY" preview_output.txt) || update_count=0
+            delete_count=$(grep -c "DELETE" preview_output.txt) || delete_count=0
             echo "changes_summary=Creates: $create_count, Updates: $update_count, Deletes: $delete_count" >> $GITHUB_OUTPUT
           fi
 
