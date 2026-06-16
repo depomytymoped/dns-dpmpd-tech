@@ -21,8 +21,6 @@ D(
   A("teleport", "178.62.225.180", TTL(DEFAULT_TTL)),
   AAAA("teleport", "2a03:b0c0:2:d0::11ef:b001", TTL(DEFAULT_TTL)),
 
-  A("mattermost.teleport", "178.62.225.180", TTL(DEFAULT_TTL)),
-
   // === API SUBDOMAIN (api.cc) ===
 
   A("ai", "5.44.252.165", TTL(SHORT_TTL)),
