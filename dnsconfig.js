@@ -18,9 +18,18 @@ D(
   A("abyss", "178.62.225.180", TTL(DEFAULT_TTL)),
   AAAA("abyss", "2a03:b0c0:2:d0::11ef:b001", TTL(DEFAULT_TTL)),
 
+  A("teleport", "178.62.225.180", TTL(DEFAULT_TTL)),
+  AAAA("teleport", "2a03:b0c0:2:d0::11ef:b001", TTL(DEFAULT_TTL)),
+
+  A("mattermost.teleport", "178.62.225.180", TTL(DEFAULT_TTL)),
+
+  // === API SUBDOMAIN (api.cc) ===
+
   A("ai", "5.44.252.165", TTL(SHORT_TTL)),
 
   A("ai-agents", "5.44.252.165", TTL(SHORT_TTL)),
+
+  A("upload", "193.169.240.248", TTL(SHORT_TTL)),
 
   A("aq", "135.181.118.58", TTL(DEFAULT_TTL)),
   AAAA("aq", "2a01:4f9:4b:1e08::2", TTL(DEFAULT_TTL)),
